@@ -85,6 +85,27 @@ for (const name of shots) {
 // The dossier is written last: the scorer rebuilds it from this /output and compares bytes.
 writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } }));
 
+// Verify the run before reporting it: rebuild the dossier from the output directory and compare
+// bytes with the copy just written. A mismatch means the program is not deterministic, and the
+// entry must not ship on a run that cannot reproduce itself. The rebuild is safe to repeat here
+// because the dossier is built only from the dashboard files and the screenshots, never from the
+// dossier file itself, so writing it first cannot change what the rebuild produces.
+const dossierWritten = readFileSync(join(out, 'dossier.json'));
+const dossierRebuilt = buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } });
+if (!dossierWritten.equals(dossierRebuilt)) {
+  process.stderr.write('token radar: dossier.json does not match a fresh rebuild of the same output: the run is not deterministic\n');
+  process.exit(1);
+}
+
+// The board and the dashboard data are pure functions of the snapshot, so scoring the same
+// snapshot a second time must agree with the first line for line. Anything else is a bug in the
+// model, not in the data, and the run must stop here rather than hand a broken board to a judge.
+const { board: boardAgain, radar: radarAgain } = buildRadar(snapshot);
+if (JSON.stringify({ rows: board }) !== JSON.stringify({ rows: boardAgain }) || dataScript(radar) !== dataScript(radarAgain)) {
+  process.stderr.write('token radar: a second scoring of the same snapshot disagrees with the first\n');
+  process.exit(1);
+}
+
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,

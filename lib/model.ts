@@ -1,7 +1,7 @@
 // The token radar's model, radar-2: one snapshot of the protocol universe in, one ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and every
-// other rankable pre-token protocol in the snapshot: 246 rows in all on this snapshot. A protocol is
+// other rankable pre-token protocol in the snapshot: 244 rows in all on this snapshot. A protocol is
 // pre-token when its index entry records no token (no market cap, no CoinGecko id, no symbol); the
 // snapshot's live-token protocols are kept apart and shown as the market's own values, never mixed
 // into the ranked board.
@@ -25,7 +25,8 @@
 //                (a protocol live on more chains reaches more farmers)
 //   penalty    = 0.5 when the protocol looks like a product of a token that already trades:
 //                category Bridge / Canonical Bridge / Liquid Staking / Liquid Restaking /
-//                Restaked BTC / CEX, or a name carrying a whole word wrapped / staked / staking,
+//                Restaked BTC / CEX / Stablecoin Wrapper / Staking Pool / Cross Chain Bridge,
+//                or a name carrying a whole word wrapped / staked / staking,
 //                or a name beginning with an exchange's name; otherwise 1.0
 //   implied    = max(1, round(base x growthMult x maturity x divers x penalty))
 //
@@ -34,6 +35,26 @@
 // a staking product), so it is set aside with its reason instead of ranked as a launch. Below
 // the floor a flagged protocol may still rank, halved by the penalty, as an early find — the
 // starter ranked below-floor rows the same way. Exchanges and versioned pools never rank.
+//
+// The three categories added after the first build all fail the same test: does the value in
+// this protocol already trade somewhere else under a name everyone knows? A stablecoin wrapper
+// is a token in a different coat; a staking pool is a deposit receipt for a token that already
+// trades; a cross-chain bridge is the road a token travels on, not the token itself. Each of
+// them, at the floor, would otherwise sit near the top of the board on size alone and crowd out
+// protocols whose launch has not happened yet. Below the floor they still rank, halved, because
+// a small wrapper or pool can still be the first sign of a launch that has not been priced in.
+//
+// A row that makes the board is never also set aside: buildRadar passes the board's own slugs
+// as the exclusion set when it builds the set-aside list, so the two lists are disjoint by
+// construction and the dashboard never shows the same protocol twice under two different flags.
+//
+// Farm steps are written per protocol, not per category: the first step opens on the wallet and
+// the chains the protocol actually lives on, the weekly step names the action that fits the
+// category, the hold step gives a reason tied to the protocol's age band, and the log step tells
+// the farmer what to keep in the notebook that proves the work was done. Steps two, three and
+// six stay fixed — the size tier, the second chain, and the claim step — because those are the
+// same job for every row. Every step still states its cost and its time, and every claim step
+// still says the snapshot records no points programme, so the plan never invents a reward.
 //
 // The constants are the model's, stated in the dashboard and changeable in the model sandbox.
 
@@ -240,7 +261,7 @@ export function diversificationMultiplier(chainCount: number): number {
 }
 
 /** Categories that read as a product of a token that already trades. */
-const PRODUCT_CATEGORIES = new Set(['bridge', 'canonical bridge', 'liquid staking', 'liquid restaking', 'restaked btc', 'cex']);
+const PRODUCT_CATEGORIES = new Set(['bridge', 'canonical bridge', 'liquid staking', 'liquid restaking', 'restaked btc', 'cex', 'stablecoin wrapper', 'staking pool', 'cross chain bridge']);
 
 /** A whole word wrapped, staked or staking in a name. */
 const WRAPPED_WORD = /\b(wrapped|staked|staking)\b/i;
@@ -425,6 +446,80 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
 }
 
 /**
+ * How the farm plan varies from row to row, so 244 protocols do not all read like the same plan
+ * with a different name pasted in. Four of the seven steps vary; the other three are the same job
+ * for every row and stay fixed, which the dashboard's mirror keeps in step too.
+ *
+ *   Step 1 (the fresh wallet) varies on two axes: how many chains the protocol lives on, and how
+ *   old it is. Three or more chains means the wallet will sign on several networks, so the step
+ *   says so up front; one chain means a single-network wallet is enough. A protocol younger than
+ *   six months gets a line about being early and keeping the seed phrase offline from day one,
+ *   because its earliest farmers are the ones a snapshot is most likely to catch.
+ *
+ *   Step 4 (the weekly action) varies on the category alone, in the category's own vocabulary:
+ *   lending says supply and borrow, a dex says add and remove liquidity, a bridge says move
+ *   funds across, staking says restake the receipt, a prediction market says place a position.
+ *   The weekly step is the one the farmer repeats, so it is the one that has to sound like the
+ *   protocol it belongs to, not like a template.
+ *
+ *   Step 5 (the hold) varies on the age band: under six months the hold is framed as staying
+ *   through the first season of the protocol, six to twelve months as surviving the first year,
+ *   older than a year as holding a position that has already lasted. The hold length itself comes
+ *   from the same age band — 60 days for the youngest, 45 for the middle, 30 for the oldest —
+ *   because a young protocol's snapshot window is the one most likely to reward patience.
+ *
+ *   Step 7 (the notebook) varies on the chain count: several chains means a log per chain, so
+ *   the farmer can prove work on each one; one chain means a single log is enough. The step
+ *   always names the same three things to keep — the wallet address, the transaction hash and
+ *   the date — because those are the only proof a snapshot can ever be checked against.
+ *
+ * Nothing here invents a reward. Every claim step says the snapshot records no points programme
+ * for that protocol, and every step still carries its cost and its time, because a plan without
+ * either is a wish, not a plan.
+ */
+/** Step 1, the fresh wallet, varied by how many chains the plan touches and how old the protocol is. */
+function step1Text(p: SnapshotProtocol, age: number | null): string {
+  const chains = p.chains.length;
+  if (chains >= 3) return `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. It will touch ${chains} chains, so one wallet keeps the whole trail in one place.`;
+  if (chains === 2) return `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. It will be active on two chains, so keep the same wallet for both sides of the plan.`;
+  if (age === null) return `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. The protocol's listing date is not on record, so treat the position as new and size the first deposit small.`;
+  if (age < 180) return `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. The protocol is under six months old, so size the first deposit small and add later only if the position holds.`;
+  return `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. Everything here runs on ${chainOf(p)}, so one wallet covers the whole plan.`;
+}
+
+/** Step 4, the weekly action, varied by the category's own vocabulary. */
+function weeklyText(p: SnapshotProtocol): string {
+  const c = (p.category ?? '').toLowerCase();
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return 'Make one qualifying action each week, such as a borrow against the deposit or a top-up of collateral.';
+  if (c.includes('dex') || c.includes('yield') || c.includes('leveraged farm')) return 'Make one qualifying action each week, such as adding a little liquidity or claiming and re-staking the yield.';
+  if (c.includes('bridge')) return 'Make one qualifying action each week, such as bridging a small amount back or using the bridged funds in the app.';
+  if (c.includes('staking') || c.includes('restak')) return 'Make one qualifying action each week, such as restaking the rewards or adding a small amount to the stake.';
+  if (c.includes('perpetual') || c.includes('derivative')) return 'Make one qualifying action each week, such as rebalancing the hedge or closing and reopening the small position.';
+  if (c.includes('prediction')) return 'Make one qualifying action each week, such as settling one market and opening another small one.';
+  if (c.includes('curator') || c.includes('allocator')) return 'Make one qualifying action each week, such as rebalancing between the vaults or adding to the winning one.';
+  if (c.includes('stable')) return 'Make one qualifying action each week, such as minting a little more of the stable asset or moving it between its pools.';
+  if (c.includes('rwa')) return 'Make one qualifying action each week, such as claiming the yield or adding to the yield asset.';
+  if (c.includes('insurance')) return 'Make one qualifying action each week, such as renewing the cover or adjusting it to the position size.';
+  return 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.';
+}
+
+/** Step 5, the hold, with the reason for the wait varied by the protocol's age. */
+function holdText(age: number | null, hold: number): string {
+  if (age === null) return `Hold the position for at least ${hold} days: the protocol's listing date is not on record, so a full month of activity is the safest qualifying window.`;
+  if (age < 180) return `Hold the position for at least ${hold} days: a protocol this young is usually judged on its earliest farmers, so the longest window counts most.`;
+  if (age < 365) return `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`;
+  return `Hold the position for at least ${hold} days: a protocol that has run this long rewards steady holders, so staying in beats churning in and out.`;
+}
+
+/** Step 7, the farm log, varied by how many chains the log must cover. */
+function logText(p: SnapshotProtocol): string {
+  const chains = p.chains.length;
+  if (chains >= 3) return `Write the wallet, the dates, every chain and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.`;
+  if (chains === 2) return `Write the wallet, the dates, both chains and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.`;
+  return `Write the wallet, the dates, the chain and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.`;
+}
+
+/**
  * A protocol's farm plan: seven steps, each an action with a cost and a time. The plan is derived
  * from the protocol's own record (category, chains, TVL, age), never from a hand-written list of
  * names, and it never claims a points programme the snapshot does not record: the snapshot carries
@@ -451,7 +546,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
         };
   return [
     {
-      text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+      text: step1Text(p, age),
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
     },
@@ -462,12 +557,12 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
     },
     secondStep,
     {
-      text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.`,
+      text: weeklyText(p),
       cost: 'about $2 of gas a week',
       time: '10 minutes a week',
     },
     {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+      text: holdText(age, hold),
       cost: `the $${capital} stays in the position`,
       time: `${hold} days`,
     },
@@ -477,7 +572,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '10 minutes',
     },
     {
-      text: `Write the wallet, the dates, the chains and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.`,
+      text: logText(p),
       cost: 'nothing but the log',
       time: '5 minutes',
     },
@@ -501,9 +596,14 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
     }));
 }
 
-/** The pre-token protocols set aside from the ranked board, biggest TVL first, each with its reason. */
-export function setAsideRows(snapshot: Snapshot): SetAsideRow[] {
+/**
+ * The pre-token protocols set aside from the ranked board, biggest TVL first, each with its
+ * reason. `exclude` holds the board's slugs: a protocol that ranks — a watchlist row that carries
+ * the penalty, halved — is never also set aside, so the two lists cannot contradict each other.
+ */
+export function setAsideRows(snapshot: Snapshot, exclude: Set<string> = new Set()): SetAsideRow[] {
   return snapshot.protocols
+    .filter((p) => !exclude.has(p.slug))
     .map((p) => ({ p, reason: setAsideReason(p, snapshot.floor_usd) }))
     .filter((x): x is { p: SnapshotProtocol; reason: string } => x.reason !== null)
     .sort((a, b) => b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0))
@@ -546,7 +646,7 @@ export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
-  const setAside = setAsideRows(snapshot);
+  const setAside = setAsideRows(snapshot, new Set(board.map((r) => r.slug)));
   const watchlist = new Set(snapshot.watchlist);
   const early = board.filter((r) => !watchlist.has(r.slug)).length;
   const radar: RadarData = {

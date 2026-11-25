@@ -6,7 +6,8 @@
 // checks the number board.json carries, so the page's code and the board's data are visibly the
 // same arithmetic. It mirrors lib/model.ts impliedValue exactly: log-scale size, clamped growth,
 // the age curve, chain diversification, and the 0.5 product penalty for protocols that read as a
-// wrapped, staked or bridged product of a token that already trades.
+// wrapped, staked, bridged, stablecoin-wrapper, staking-pool or cross-chain-bridge product of a
+// token that already trades.
 (function () {
   'use strict';
 
@@ -51,7 +52,7 @@
     if (n <= 4) return 1.03;
     return 1.06;
   }
-  var PRODUCT_CATEGORIES = { bridge: 1, 'canonical bridge': 1, 'liquid staking': 1, 'liquid restaking': 1, 'restaked btc': 1, cex: 1 };
+  var PRODUCT_CATEGORIES = { bridge: 1, 'canonical bridge': 1, 'liquid staking': 1, 'liquid restaking': 1, 'restaked btc': 1, cex: 1, 'stablecoin wrapper': 1, 'staking pool': 1, 'cross chain bridge': 1 };
   var EXCHANGES = ['binance', 'coinbase', 'bybit', 'kraken', 'bitget', 'okx', 'bitfinex', 'gemini'];
   function penaltyOf(row) {
     var cat = (row.category || '').toLowerCase();
@@ -130,6 +131,41 @@
     if (s.length < 20) s = s + " Hold the position and check the protocol's own page.";
     return s;
   }
+  function step1Text(p) {
+    var chains = (p.chains || []).length;
+    var age = p.age_days;
+    if (chains >= 3) return 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. It will touch ' + chains + ' chains, so one wallet keeps the whole trail in one place.';
+    if (chains === 2) return 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. It will be active on two chains, so keep the same wallet for both sides of the plan.';
+    if (age === null || age === undefined) return "Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. The protocol's listing date is not on record, so treat the position as new and size the first deposit small.";
+    if (age < 180) return 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. The protocol is under six months old, so size the first deposit small and add later only if the position holds.';
+    return 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. Everything here runs on ' + chainOf(p) + ', so one wallet covers the whole plan.';
+  }
+  function weeklyText(p) {
+    var c = (p.category || '').toLowerCase();
+    if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0) return 'Make one qualifying action each week, such as a borrow against the deposit or a top-up of collateral.';
+    if (c.indexOf('dex') >= 0 || c.indexOf('yield') >= 0 || c.indexOf('leveraged farm') >= 0) return 'Make one qualifying action each week, such as adding a little liquidity or claiming and re-staking the yield.';
+    if (c.indexOf('bridge') >= 0) return 'Make one qualifying action each week, such as bridging a small amount back or using the bridged funds in the app.';
+    if (c.indexOf('staking') >= 0 || c.indexOf('restak') >= 0) return 'Make one qualifying action each week, such as restaking the rewards or adding a small amount to the stake.';
+    if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0) return 'Make one qualifying action each week, such as rebalancing the hedge or closing and reopening the small position.';
+    if (c.indexOf('prediction') >= 0) return 'Make one qualifying action each week, such as settling one market and opening another small one.';
+    if (c.indexOf('curator') >= 0 || c.indexOf('allocator') >= 0) return 'Make one qualifying action each week, such as rebalancing between the vaults or adding to the winning one.';
+    if (c.indexOf('stable') >= 0) return 'Make one qualifying action each week, such as minting a little more of the stable asset or moving it between its pools.';
+    if (c.indexOf('rwa') >= 0) return 'Make one qualifying action each week, such as claiming the yield or adding to the yield asset.';
+    if (c.indexOf('insurance') >= 0) return 'Make one qualifying action each week, such as renewing the cover or adjusting it to the position size.';
+    return 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.';
+  }
+  function holdText(age, hold) {
+    if (age === null || age === undefined) return 'Hold the position for at least ' + hold + " days: the protocol's listing date is not on record, so a full month of activity is the safest qualifying window.";
+    if (age < 180) return 'Hold the position for at least ' + hold + ' days: a protocol this young is usually judged on its earliest farmers, so the longest window counts most.';
+    if (age < 365) return 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.';
+    return 'Hold the position for at least ' + hold + ' days: a protocol that has run this long rewards steady holders, so staying in beats churning in and out.';
+  }
+  function logText(p) {
+    var chains = (p.chains || []).length;
+    if (chains >= 3) return 'Write the wallet, the dates, every chain and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.';
+    if (chains === 2) return 'Write the wallet, the dates, both chains and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.';
+    return 'Write the wallet, the dates, the chain and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.';
+  }
   function farmSteps(p) {
     var chain = chainOf(p);
     var capital = capitalFor(p);
@@ -139,13 +175,13 @@
       ? { text: 'Use ' + p.name + ' on ' + second + ' as well, with $' + Math.max(25, Math.floor(capital / 2)) + ' of the same position, so the wallet shows activity on two of its ' + p.chains.length + ' chains.', cost: '$' + Math.max(25, Math.floor(capital / 2)) + ' of capital and about $4 of gas', time: '15 minutes to set up' }
       : { text: 'Make a second, different action inside ' + p.name + ' on ' + chain + ', such as a swap or a deposit of another asset, so the wallet shows more than one interaction type.', cost: 'about $2 of gas', time: '10 minutes' };
     return [
-      { text: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
+      { text: step1Text(p), cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + (capital >= 150 ? 8 : 4) + ' of gas', time: '15 minutes to set up' },
       secondStep,
-      { text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
-      { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
+      { text: weeklyText(p), cost: 'about $2 of gas a week', time: '10 minutes a week' },
+      { text: holdText(p.age_days, hold), cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Before you withdraw, open the protocol's own points or rewards page from a link the protocol itself publishes, and claim only there. This snapshot records no points programme for " + p.name + ', so treat any other site promising one as a scam until the protocol says otherwise.', cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Write the wallet, the dates, the chains and every transaction hash in a farm log, and plan the unwind in two steps so you are never forced to exit in one trade.', cost: 'nothing but the log', time: '5 minutes' }
+      { text: logText(p), cost: 'nothing but the log', time: '5 minutes' }
     ].map(stepText);
   }
 
@@ -364,6 +400,43 @@
     );
   }
 
+  function categoryPanel() {
+    var byCat = {};
+    DATA.rows.forEach(function (r) {
+      var c = r.category || 'Other';
+      if (!byCat[c]) byCat[c] = { count: 0, tvl: 0 };
+      byCat[c].count += 1;
+      byCat[c].tvl += r.tvl_usd;
+    });
+    var cats = Object.keys(byCat).sort(function (a, b) { return byCat[b].tvl - byCat[a].tvl; });
+    return el('section', { class: 'panel cats' },
+      el('h2', { text: 'Where the board comes from' }),
+      el('p', { class: 'sub', text: 'Every ranked row grouped by the category the snapshot records. A category with a few very large protocols can outweigh one with many small ones; the board ranks protocols, never categories, so a small category can still hold the top row.' }),
+      el('div', { class: 'cats-grid' }, cats.map(function (c) {
+        return el('div', { class: 'cat' },
+          el('b', { text: c }),
+          el('span', { class: 'num', text: byCat[c].count + (byCat[c].count === 1 ? ' row' : ' rows') }),
+          el('span', { class: 'num', text: fmtUsd(byCat[c].tvl) + ' TVL' })
+        );
+      }))
+    );
+  }
+
+  function limitationsPanel() {
+    return el('section', { class: 'panel limits' },
+      el('h2', { text: 'What this radar does not do' }),
+      el('p', { class: 'sub', text: 'A radar is a lens, not a promise. Implied value is this entry\u2019s own model applied to one sealed snapshot dated ' + DATA.as_of + '; it is not a price, not a prediction that a token will be issued, and not make.fun\u2019s view of any protocol.' }),
+      el('ul', { class: 'limits-list' },
+        el('li', { text: 'Pre-token means the snapshot records no token for the protocol. That is a statement about the record, never a guarantee that no token exists anywhere.' }),
+        el('li', { text: 'The snapshot is frozen in time. A protocol that launched, shut down or changed shape after ' + DATA.as_of + ' still shows here exactly as the snapshot caught it.' }),
+        el('li', { text: 'Farm plans are generic guidance built from a protocol\u2019s category, chains, size and age. They are not financial advice, and no plan here promises an airdrop.' }),
+        el('li', { text: 'A product set aside at the floor is not judged worthless. It is judged the wrong shape for a launch ranking, because its value already trades under another name.' }),
+        el('li', { text: 'The model reads only the snapshot. It knows nothing about a protocol\u2019s team, its audits, its governance, or whether its community would even want a token.' }),
+        el('li', { text: 'Ranks are relative. The gap between rank 1 and rank 2 is a fact of this snapshot; on a different snapshot, or under a different model, the order would move.' })
+      )
+    );
+  }
+
   function modelPanel() {
     var m = DATA.model;
     return el('section', { class: 'panel model' },
@@ -439,6 +512,8 @@
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : state.tab === 'live' ? liveTable() : setAsideTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
+    if (state.tab === 'pre-token') shell.appendChild(categoryPanel());
+    if (state.tab === 'pre-token') shell.appendChild(limitationsPanel());
     app.appendChild(shell);
     app.setAttribute('aria-busy', 'false');
     if (!dialog.isConnected) app.appendChild(dialog);
